@@ -1,117 +1,119 @@
--- Q3: WHAT IS THE PRICE ELASTICITY OF DIFFERENT SEGMENTS?
+--- Q3: HOW DO DIFFERENT CUSTOMER SEGMENTS RESPOND TO DISCOUNTING?
 
 -- Business context:
---   Not every customer type responds to discounts the same way.
---   Elastic segments increase volume when discounted � making
---   some discount spend justifiable. Inelastic segments buy
---   regardless � meaning discounts on them are pure giveaway.
---
--- Finding:
---   All three segments show identical margin collapse at High
---   and Extreme discount tiers � suggesting no segment is
---   actually buying more at deep discounts, they are simply
---   being given money away. Corporate and Home Office at
---   Extreme discount lose over $1 per dollar of revenue.
---   No discount tier across any segment improves profit �
---   only Mid discounts (11-30%) remain marginally positive.
---
+-- Questions 1 and 2 showed that promotional profitability varies
+-- substantially by product and discount depth. This analysis shifts
+-- the focus to customer segments to determine whether Consumer,
+-- Corporate, and Home Office customers exhibit meaningfully different
+-- profitability and sales-activity patterns under discounting.
+
+
+-- Key Finding:
+-- All three customer segments exhibited remarkably similar
+-- profitability patterns across discount levels. Profit margins
+-- declined and loss rates increased as discount depth increased,
+-- while the distribution of sales activity remained broadly
+-- consistent across segments. Although Home Office frequently
+-- ranked highest within individual discount tiers, the differences
+-- between segments were relatively small compared with the impact
+-- of discount depth itself.
+
+
 -- Decision this enables:
---   Segment-specific discount caps. Corporate and Home Office
---   have higher avg order values and should be protected from
---   deep discounts entirely. Consumer mid-tier discounts
---   can be retained selectively.
+-- Promotional pricing strategies should primarily be driven by
+-- product economics and discount depth rather than customer
+-- segment. Since Consumer, Corporate, and Home Office respond
+-- similarly to discounting, pricing policies should emphasize
+-- sustainable discount levels across all segments instead of
+-- segment-specific discount strategies.
 
 
--- PART A: Segment x discount bucket � core elasticity matrix
--- The main analytical output for this question
+-- PART A: As discount depth increases, does profitability change 
+-- differently across Consumer, Corporate, and Home Office?
+
 
 SELECT
     segment,
     discount_bucket,
     discount_bucket_rank,
-    COUNT(*)                                                            AS total_orders,
-    ROUND(AVG(sales), 2)                                               AS avg_order_value,
-    ROUND(AVG(quantity), 2)                                            AS avg_quantity,
-    ROUND(AVG(profit), 2)                                              AS avg_profit,
-    ROUND(AVG(CASE WHEN sales = 0 THEN 0 ELSE profit * 1.0 / sales END) * 100, 2)                           AS avg_margin_pct,
+    COUNT(*)                                                           AS sales_records,
     ROUND(SUM(profit), 2)                                              AS total_profit,
+    ROUND(SUM(sales), 2)                                               AS total_revenue,
+    ROUND(SUM(profit)
+        / NULLIF(SUM(sales),0)100, 2)                                 AS profit_margin_pct,
     SUM(CASE WHEN profit_flag = 'Loss' THEN 1 ELSE 0 END)              AS loss_orders,
     ROUND(
         SUM(CASE WHEN profit_flag = 'Loss' THEN 1.0 ELSE 0 END)
-        / COUNT(*) * 100, 1
+        / COUNT() * 100, 1
     )                                                                   AS loss_rate_pct
 FROM SuperstoreDB.dbo.vw_superstore
 GROUP BY segment, discount_bucket, discount_bucket_rank
 ORDER BY segment, discount_bucket_rank;
 
 
--- PART B: Volume response to discounting per segment
--- If a segment is elastic, order count should rise at
--- higher discount tiers � flat or falling means inelastic
+-- PART B: How is sales activity distributed across discount levels for each customer segment?
+-- Shows how each customer segment's sales records and units sold
+-- are distributed across discount buckets.
+-- This is a descriptive analysis of observed sales activity.
 
-WITH segment_baseline AS (
-    -- Baseline: average order count at No Discount per segment
+WITH segment_discount_summary AS
+(
     SELECT
         segment,
-        COUNT(*) * 1.0                                                  AS baseline_orders
-    FROM SuperstoreDB.dbo.vw_superstore
-    WHERE discount_bucket = 'No Discount'
-    GROUP BY segment
+        discount_bucket,
+        discount_bucket_rank,
+        COUNT(*)                                                    AS sales_records,
+        SUM(quantity)                                               AS total_units
+FROM SuperstoreDB.dbo.vw_superstore
+GROUP BY segment, discount_bucket, discount_bucket_rank
 )
 SELECT
-    v.segment,
-    v.discount_bucket,
-    v.discount_bucket_rank,
-    COUNT(*)                                                            AS orders_at_tier,
-    ROUND(b.baseline_orders, 0)                                         AS baseline_no_discount_orders,
-    ROUND(COUNT(*) * 100.0 / b.baseline_orders, 1)                     AS volume_index
-    -- volume_index > 100 = more orders than baseline (elastic)
-    -- volume_index < 100 = fewer orders than baseline (inelastic)
-FROM SuperstoreDB.dbo.vw_superstore v
-JOIN segment_baseline b ON v.segment = b.segment
-GROUP BY v.segment, v.discount_bucket, v.discount_bucket_rank, b.baseline_orders
-ORDER BY v.segment, v.discount_bucket_rank;
-
-
--- PART C: High value orders by segment � are we discounting
--- our best customers unnecessarily?
-
-SELECT
     segment,
-    CASE WHEN is_promoted = 1 THEN 'Discounted' ELSE 'Full Price' END  AS order_type,
-    COUNT(*)                                                            AS total_orders,
-    ROUND(AVG(unit_price), 2)                                          AS avg_unit_price,
-    ROUND(AVG(sales), 2)                                               AS avg_order_value,
-    ROUND(AVG(profit), 2)                                              AS avg_profit,
-    ROUND(AVG(CASE WHEN sales = 0 THEN 0 ELSE profit * 1.0 / sales END) * 100, 2)                           AS avg_margin_pct,
-    ROUND(SUM(revenue_impact), 2)                                      AS total_revenue_given_away
-FROM SuperstoreDB.dbo.vw_superstore
-GROUP BY segment, is_promoted
-ORDER BY segment, is_promoted DESC;
+    discount_bucket,
+    sales_records,
+    ROUND(sales_records * 100.0
+        / NULLIF(SUM(sales_records) OVER
+        (PARTITION BY segment),0),2)                           AS segment_sales_record_share_pct,
+total_units,
+ROUND(total_units * 100.0
+    / NULLIF(SUM(total_units) OVER 
+    (PARTITION BY segment),0),2)                               AS segment_unit_share_pct
+FROM segment_discount_summary
+ORDER BY segment, discount_bucket_rank;
 
 
--- ------------------------------------------------------------
--- PART D: Segment profitability ranking at each discount tier
--- Window function � ranks segments by profit within each tier
--- ------------------------------------------------------------
+-- PART C: Which customer segment performs best within each discount tier?
+-- Compares segment profitability at the same discount level and ranks
+-- segments by profit margin to account for differences in segment size.
+
 WITH segment_tier AS (
     SELECT
         segment,
         discount_bucket,
         discount_bucket_rank,
+        COUNT(*)                                                        AS sales_records,
+        ROUND(SUM(sales), 2)                                            AS total_revenue,
         ROUND(SUM(profit), 2)                                           AS total_profit,
-        ROUND(AVG(CASE WHEN sales = 0 THEN 0 ELSE profit * 1.0 / sales END) * 100, 2)                        AS avg_margin_pct
-    FROM SuperstoreDB.dbo.vw_superstore
-    GROUP BY segment, discount_bucket, discount_bucket_rank
+    ROUND(SUM(profit)
+        / NULLIF(SUM(sales),0)*100, 2)                              AS profit_margin_pct,
+    ROUND(
+        SUM(CASE WHEN profit_flag = 'Loss' THEN 1.0 ELSE 0 END)
+        / COUNT(*) * 100,2)                                         AS loss_rate_pct
+
+FROM SuperstoreDB.dbo.vw_superstore
+GROUP BY segment, discount_bucket, discount_bucket_rank
 )
 SELECT
-    segment,
     discount_bucket,
+    segment,
+    sales_records,
+    total_revenue,
     total_profit,
-    avg_margin_pct,
-    RANK() OVER (
+    profit_margin_pct,
+    loss_rate_pct,
+    DENSE_RANK() OVER (
         PARTITION BY discount_bucket
-        ORDER BY total_profit DESC
-    )                                                                   AS profit_rank_within_tier
+        ORDER BY profit_margin_pct DESC
+    )                                                                   AS profitability_rank_within_tier
 FROM segment_tier
-ORDER BY discount_bucket_rank, profit_rank_within_tier;
+ORDER BY discount_bucket_rank, profitability_rank_within_tier;
