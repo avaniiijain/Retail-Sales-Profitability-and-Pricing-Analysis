@@ -5,7 +5,7 @@
 > **An end-to-end retail pricing analytics project that evaluates whether promotional discounts create sustainable business value and recommends a more profitable pricing strategy through SQL-driven analysis.**
 
 <p align="center">
-  <b>Python ETL</b> • 🗄️ <b>SQL Server Analytics</b> • <b>Tableau Storytelling</b> • <b>Docker</b>
+  <b>Python ETL</b> •  <b>SQL Server Analytics</b> • <b>Tableau Storytelling</b> • <b>Docker</b>
 </p>
 
 <p align="center">
